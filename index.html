@@ -98,6 +98,12 @@
     aspect-ratio: 1.4 / 1; border: 3px solid rgba(255,255,255,.5);
     border-radius: 18px; pointer-events: none;
   }
+  #stat {
+    position: fixed; top: 12px; right: 12px; z-index: 31;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+    background: rgba(0,0,0,.5); padding: 5px 9px; border-radius: 8px;
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -106,6 +112,7 @@
   </div>
 
   <div id="hint"></div>
+  <div id="stat" class="hidden">engine: …</div>
 
   <div id="bar">
     <div class="seg" id="modeSeg">
@@ -126,7 +133,7 @@
 
   <div id="cover">
     <h1>Scan Prototype</h1>
-    <p id="coverMsg">Tap to start. Allow camera access. Use Chrome on Android.</p>
+    <p id="coverMsg">Tap to start and allow camera access. Android: Chrome. iPhone: Safari or Chrome (not an in-app browser).</p>
     <button id="start">Start scanning</button>
   </div>
 
@@ -151,12 +158,15 @@ const cover    = document.getElementById('cover');
 const coverMsg = document.getElementById('coverMsg');
 const startBtn = document.getElementById('start');
 const modeSeg  = document.getElementById('modeSeg');
+const statEl   = document.getElementById('stat');
 
 /* ---------- state ---------- */
 let mode = 'both';                 // 'both' | 'qr' | 'code_128'
 let detector = null;
 let audioCtx = null;
 let scanning = false;
+let engineName = 'native';         // 'native' (Android) | 'polyfill' (iOS fallback)
+let avgMs = 0;                     // rolling avg of detect() time
 const lastSeen = new Map();        // code -> timestamp (dedupe)
 const DEDUPE_MS = 2500;
 const SCAN_INTERVAL_MS = 120;
@@ -243,7 +253,11 @@ function handleCode(value, format) {
 async function loop() {
   if (!scanning) return;
   try {
+    const t0 = performance.now();
     const codes = await detector.detect(video);
+    const dt = performance.now() - t0;
+    avgMs = avgMs ? avgMs * 0.8 + dt * 0.2 : dt;   // simple EMA
+    statEl.textContent = engineName + ' · ' + Math.round(avgMs) + ' ms/scan';
     if (codes && codes.length) {
       // take the first detected; format already constrained by mode
       const c = codes[0];
@@ -280,14 +294,28 @@ modeSeg.addEventListener('click', (e) => {
 
 /* ---------- start ---------- */
 startBtn.addEventListener('click', async () => {
-  if (!('BarcodeDetector' in window)) {
-    coverMsg.textContent = 'BarcodeDetector is not available in this browser. Use Chrome on Android.';
-    return;
-  }
   try {
     initAudio();
     // quick silent tick so iOS/Android unlock audio on the gesture
     tone(1, 0, 0.01, 0.0001);
+
+    // Android Chrome has BarcodeDetector natively -> use it (fast, no download).
+    // iOS Safari does not -> load the WASM (ZXing) polyfill on demand.
+    // This import only runs when the native API is missing, so Android is untouched.
+    if (!('BarcodeDetector' in window)) {
+      coverMsg.textContent = 'Loading scanner engine…';
+      try {
+        const mod = await import('https://esm.sh/barcode-detector@2/pure');
+        window.BarcodeDetector = mod.BarcodeDetector;
+        engineName = 'polyfill';
+      } catch (e) {
+        coverMsg.textContent = 'Could not load the scanner engine. Check your connection and open in Safari or Chrome (not an in-app browser).';
+        return;
+      }
+    } else {
+      engineName = 'native';
+    }
+    statEl.classList.remove('hidden');
 
     let supported = [];
     try { supported = await BarcodeDetector.getSupportedFormats(); } catch (_) {}
