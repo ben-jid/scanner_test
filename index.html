@@ -116,7 +116,8 @@
 
   <div id="bar">
     <div class="seg" id="modeSeg">
-      <button data-mode="both" class="active">Both</button>
+      <button data-mode="auto" class="active">Auto (all)</button>
+      <button data-mode="both">QR+128</button>
       <button data-mode="qr">QR only</button>
       <button data-mode="code_128">Code128</button>
     </div>
@@ -161,7 +162,8 @@ const modeSeg  = document.getElementById('modeSeg');
 const statEl   = document.getElementById('stat');
 
 /* ---------- state ---------- */
-let mode = 'both';                 // 'both' | 'qr' | 'code_128'
+let mode = 'auto';                 // 'auto' | 'both' | 'qr' | 'code_128'
+let supportedFormats = [];         // formats this browser/engine can read
 let detector = null;
 let audioCtx = null;
 let scanning = false;
@@ -219,7 +221,9 @@ function flashFail() {
 function formatsForMode() {
   if (mode === 'qr') return ['qr_code'];
   if (mode === 'code_128') return ['code_128'];
-  return ALL_FORMATS.slice();
+  if (mode === 'both') return ALL_FORMATS.slice();
+  // 'auto' -> everything this engine supports (diagnostic: tells you the symbology)
+  return supportedFormats.length ? supportedFormats.slice() : ALL_FORMATS.slice();
 }
 function buildDetector() {
   detector = new BarcodeDetector({ formats: formatsForMode() });
@@ -319,8 +323,9 @@ startBtn.addEventListener('click', async () => {
 
     let supported = [];
     try { supported = await BarcodeDetector.getSupportedFormats(); } catch (_) {}
-    if (supported.length && !supported.includes('qr_code') && !supported.includes('code_128')) {
-      coverMsg.textContent = 'This browser exposes BarcodeDetector but supports neither QR nor Code128.';
+    supportedFormats = supported.slice();
+    if (!supported.length) {
+      coverMsg.textContent = 'This browser exposes BarcodeDetector but reports no supported formats.';
       return;
     }
 
