@@ -145,7 +145,10 @@ const DB = {
   "10000002": "Bob Smith",
   "10000003": "Charlie Davis",
   "10000004": "Dana Lee",
-  "12345678": "Test Badge"
+  "12345678": "Test Badge",
+  "33058252": "chefe",
+  "33058251": "fat gus",
+  "33058254": "bubbles"
 };
 
 /* ---------- elements ---------- */
@@ -174,6 +177,12 @@ const DEDUPE_MS = 2500;
 const SCAN_INTERVAL_MS = 120;
 
 const ALL_FORMATS = ['qr_code', 'code_128'];
+
+/* ---------- ITF anti-misread settings ---------- */
+const CODE_PATTERN = /^\d{8}$/;    // codes must be exactly 8 digits (rejects truncated ITF reads)
+const CONFIRM_COUNT = 2;           // require this many identical reads in a row before accepting
+let candidate = null;              // value currently being confirmed
+let candidateCount = 0;            // how many times we've seen it consecutively
 
 /* ---------- audio ---------- */
 function initAudio() {
@@ -231,6 +240,21 @@ function buildDetector() {
 
 /* ---------- result handling ---------- */
 function handleCode(value, format) {
+  // 1) Format gate: reject anything that isn't a full 8-digit code.
+  //    This silently drops truncated ITF reads (the "last digit wrong/dropped" case).
+  if (!CODE_PATTERN.test(value)) {
+    candidate = null; candidateCount = 0;
+    return;
+  }
+
+  // 2) Confirmation: require N identical reads in a row before trusting it.
+  if (value === candidate) {
+    candidateCount++;
+  } else {
+    candidate = value; candidateCount = 1;
+  }
+  if (candidateCount < CONFIRM_COUNT) return;   // not confirmed yet, keep looking
+
   const now = Date.now();
   const prev = lastSeen.get(value) || 0;
   if (now - prev < DEDUPE_MS) return;     // ignore rapid repeats
